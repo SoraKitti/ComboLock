@@ -16,10 +16,18 @@
 
 uint8_t getKeyPressed();
 void displayData(uint8_t address, uint8_t value);
+cowpi_ioPortRegisters *ioPorts;   // an array of I/O ports
+cowpi_spiRegisters *spi;          // a pointer to the single set of SPI registers
+unsigned long lastLeftButtonPress = 0;
+unsigned long lastRightButtonPress = 0;
+unsigned long lastLeftSwitchSlide = 0;
+unsigned long lastRightSwitchSlide = 0;
+unsigned long lastKeypadPress = 0;
 void testSimpleIO();
+uint8_t builderArray[8] = {0x00};
 
 void printArray() {
-  for (int i = 7; i >= 0; i--) {
+  for (int i = 0; i < 8; i++) {
     // Serial.print("Array at ");
     // Serial.print(i);
     // Serial.print(": ");
@@ -61,7 +69,6 @@ int base(uint8_t key) {
    }
 }
 
-uint8_t builderArray[8] = {0x00};
 int numsInDisplay = 0;
 
 void clearDisplay() {
@@ -72,7 +79,7 @@ void clearDisplay() {
   numsInDisplay = 0;
 }
 
-const uint8_t sevenSegments[16] = {
+const uint8_t sevenSegments[17] = {// Consider adding a 17th element for the dash
   // {0,1,2,3,4,5,6,7,8,9,"A","b","c","d","E","F"}
   0b01111110, //0
   0b00110000, //1
@@ -90,6 +97,7 @@ const uint8_t sevenSegments[16] = {
   0b00111101, //d
   0b01001111, //E
   0b01000111, //F
+  0b00000001  // DASH
 };
 
 const uint8_t keys[4][4] = {
@@ -104,6 +112,36 @@ void setup() {
   cowpi_setup(SPI | MAX7219);
   ioPorts = (cowpi_ioPortRegisters *)(cowpi_IObase + 0x03);
   spi = (cowpi_spiRegisters *)(cowpi_IObase + 0x2C);
+  builderArray[2] = 255;
+  displayData(3, 0b00000001);
+  builderArray[5] = 255;
+  displayData(6, 0b00000001);
+}
+
+int currentIndex = 8;
+// consider calling this once with an index and a value instead of the key
+void buildCombo(uint8_t key, int index) {
+
+  switch (index) {
+
+    case(3):
+      builderArray[6] = key;
+      displayData(2, sevenSegments[key]);
+      currentIndex = 1;
+      break;
+    
+    case(6): 
+      builderArray[3] = key;
+      displayData(5, sevenSegments[key]);
+      currentIndex = 4;
+      break;
+
+    default:
+      builderArray[8-index] = key;
+      displayData(index, sevenSegments[key]);
+      currentIndex--;
+      break;
+  }
 }
 
 void loop() {
@@ -111,76 +149,12 @@ void loop() {
   if (((ioPorts[A0_A5].input & 0b00001111) != 0b00001111) && (millis() - lastKeypadPress > BUTTON_NO_REPEAT_TIME)) {
     uint8_t keypress = getKeyPressed();
     if (keypress < 0x10) {
-      int base10 = ioPorts[A0_A5].input & 0b00100000;
-      if ((ioPorts[A0_A5].input & 0b00010000) == 0) { // if left switch is left (demonstration mode)
-        unsigned long elasped = millis();
-        ioPorts[D8_D13].output |= 0b10000;
-        while (millis() - elasped < 500);
-        ioPorts[D8_D13].output &= 0b11101111;
-        if (base10 == 0) {
-          if (base(keypress)) {
-            clearDisplay();
-            displayData(1, sevenSegments[keypress]);
-            builderArray[0] = keypress;
-            numsInDisplay++;
-          }
-        // change digit in first arg to display to which place on 7 seg display
-        } else {
-          clearDisplay();
-          displayData(1, sevenSegments[keypress]);
-          builderArray[0] = keypress;
-          numsInDisplay++;
-        }
-      // builder mode
-      } else {
-        // loop to move elements over
-        for (int i = 7; i > 0; i--) {
-          if (numsInDisplay < 8) {
-            if ((builderArray[i-1] != 0x00)) {
-              if (base10 == 0) {
-                if (base(keypress)) {
-                  uint8_t temp = builderArray[i-1];
-                  builderArray[i] = temp;
-                  if (builderArray[i] == 255) {
-                    displayData((i+1), 0b00000001);
-                  } else {
-                    displayData((i+1), sevenSegments[builderArray[i]]);
-                  }
-                }
-              } else {
-                uint8_t temp = builderArray[i-1];
-                builderArray[i] = temp;
-                if (builderArray[i] == 255) {
-                  displayData((i+1), 0b00000001);
-                } else {
-                  displayData((i+1), sevenSegments[builderArray[i]]);
-                }
-              }
-            }
-          }
-          
-        }
-        if (base10 == 0) {
-          if (base(keypress)) {
-            if (numsInDisplay < 8) {
-              builderArray[0] = keypress;
-              displayData(1, sevenSegments[keypress]);
-              numsInDisplay++;
-            } else {
-              tooBig();
-            }
-          }
-        } else {
-          if (numsInDisplay < 8) {
-            builderArray[0] = keypress;
-            displayData(1, sevenSegments[keypress]);
-            numsInDisplay++;
-          } else {
-            tooBig();
-          }
-        }
-        printArray();
+
+      // get count of nums in combination currently, then call buildCombo with the next index and the key pressed, then update count
+      if (currentIndex >= 0) {
+        buildCombo(keypress, currentIndex);
       }
+        
       if ((ioPorts[A0_A5].input & 0b00010000) == 0) {
         Serial.print("Key pressed: ");
         Serial.println(keypress, HEX);
@@ -191,6 +165,92 @@ void loop() {
     }
   }
 }
+
+// void loop() {
+//   testSimpleIO();
+//   if (((ioPorts[A0_A5].input & 0b00001111) != 0b00001111) && (millis() - lastKeypadPress > BUTTON_NO_REPEAT_TIME)) {
+//     uint8_t keypress = getKeyPressed();
+//     if (keypress < 0x10) {
+//       int base10 = ioPorts[A0_A5].input & 0b00100000;
+//       if ((ioPorts[A0_A5].input & 0b00010000) == 0) { // if left switch is left (demonstration mode)
+//         unsigned long elasped = millis();
+//         ioPorts[D8_D13].output |= 0b10000;
+//         while (millis() - elasped < 500);
+//         ioPorts[D8_D13].output &= 0b11101111;
+//         if (base10 == 0) {
+//           if (base(keypress)) {
+//             clearDisplay();
+//             displayData(1, sevenSegments[keypress]);
+//             builderArray[0] = keypress;
+//             numsInDisplay++;
+//           }
+//         // change digit in first arg to display to which place on 7 seg display
+//         } else {
+//           clearDisplay();
+//           displayData(1, sevenSegments[keypress]);
+//           builderArray[0] = keypress;
+//           numsInDisplay++;
+//         }
+//       // builder mode
+//       } else {
+//         // loop to move elements over
+//         for (int i = 7; i > 0; i--) {
+//           if (numsInDisplay < 8) {
+//             if ((builderArray[i-1] != 0x00)) {
+//               if (base10 == 0) {
+//                 if (base(keypress)) {
+//                   uint8_t temp = builderArray[i-1];
+//                   builderArray[i] = temp;
+//                   if (builderArray[i] == 255) {
+//                     displayData((i+1), 0b00000001);
+//                   } else {
+//                     displayData((i+1), sevenSegments[builderArray[i]]);
+//                   }
+//                 }
+//               } else {
+//                 uint8_t temp = builderArray[i-1];
+//                 builderArray[i] = temp;
+//                 if (builderArray[i] == 255) {
+//                   displayData((i+1), 0b00000001);
+//                 } else {
+//                   displayData((i+1), sevenSegments[builderArray[i]]);
+//                 }
+//               }
+//             }
+//           }
+          
+//         }
+//         if (base10 == 0) {
+//           if (base(keypress)) {
+//             if (numsInDisplay < 8) {
+//               builderArray[0] = keypress;
+//               displayData(1, sevenSegments[keypress]);
+//               numsInDisplay++;
+//             } else {
+//               tooBig();
+//             }
+//           }
+//         } else {
+//           if (numsInDisplay < 8) {
+//             builderArray[0] = keypress;
+//             displayData(1, sevenSegments[keypress]);
+//             numsInDisplay++;
+//           } else {
+//             tooBig();
+//           }
+//         }
+//         printArray();
+//       }
+//       if ((ioPorts[A0_A5].input & 0b00010000) == 0) {
+//         Serial.print("Key pressed: ");
+//         Serial.println(keypress, HEX);
+//       }
+      
+//     } else {
+//       Serial.println("Error reading keypad.");
+//     }
+//   }
+// }
 
 uint8_t getKeyPressed() {
   uint8_t keyPressed = 0xFF;
@@ -289,10 +349,11 @@ void testSimpleIO() {
       } 
     }
     if (leftSwitchCurrentPosition != 0) {
-      negate(numsInDisplay);
+      // negate(numsInDisplay);
     }
     if (!leftSwitchCurrentPosition) {
       Serial.print("\tLeft button pressed");
+      printArray();
     }
     printedThisTime = 1;
     lastLeftButtonPress = now;
@@ -339,59 +400,59 @@ unsigned long countdownStart = 0;
 const uint8_t *message = NULL;
 const uint8_t *lastMessage = NULL;
 
-const uint8_t alertMessage[8] = {...};
-const uint8_t leftMessage[8] = {...};
-const uint8_t rightMessage[8] = {...};
-const uint8_t clearMessage[8] = {...};
+// const uint8_t alertMessage[8] = {...};
+// const uint8_t leftMessage[8] = {...};
+// const uint8_t rightMessage[8] = {...};
+// const uint8_t clearMessage[8] = {...};
 
-void setup() {
-  Serial.begin(9600);
-  cowpi_setup(SPI | MAX7219);
-}
+// void setup() {
+//   Serial.begin(9600);
+//   cowpi_setup(SPI | MAX7219);
+// }
 
-void loop() {
-  if (leftSwitchInLeftPosition() && leftButtonIsPressed()) {
-    alarmUsingDelay();
-  } else if (leftSwitchInRightPosition()) {
-    responsiveMessageWithoutInterrupts();
-  }
-}
+// void loop() {
+//   if (leftSwitchInLeftPosition() && leftButtonIsPressed()) {
+//     alarmUsingDelay();
+//   } else if (leftSwitchInRightPosition()) {
+//     responsiveMessageWithoutInterrupts();
+//   }
+// }
 
-void alarmUsingDelay() {
-  displayMessage(alertMessage);
-  while(1) {
-    digitalWrite(12, HIGH);
-    delay(250);
-    digitalWrite(12, LOW);
-    delay(250);
-  }
-}
+// void alarmUsingDelay() {
+//   displayMessage(alertMessage);
+//   while(1) {
+//     digitalWrite(12, HIGH);
+//     delay(250);
+//     digitalWrite(12, LOW);
+//     delay(250);
+//   }
+// }
 
-void responsiveMessageWithoutInterrupts() {
-  if (leftButtonIsPressed()) {
-    countdownStart = millis();
-    message = leftMessage;
-    lastMessage = clearMessage;
-    displayMessage(message);
-  } else if (rightButtonIsPressed()) {
-    countdownStart = millis();
-    message = rightMessage;
-    lastMessage = clearMessage;
-    displayMessage(message);
-  } else {
-    unsigned long now = millis();
-    if (now - countdownStart > 1000) {
-      countdownStart = now;
-      if (message == clearMessage) {
-        message = lastMessage;
-        lastMessage = clearMessage;
-      } else {
-        lastMessage = message;
-        message = clearMessage;
-      }
-      if (message != NULL) {
-        displayMessage(message);
-      }
-    }
-  }
-}
+// void responsiveMessageWithoutInterrupts() {
+//   if (leftButtonIsPressed()) {
+//     countdownStart = millis();
+//     message = leftMessage;
+//     lastMessage = clearMessage;
+//     displayMessage(message);
+//   } else if (rightButtonIsPressed()) {
+//     countdownStart = millis();
+//     message = rightMessage;
+//     lastMessage = clearMessage;
+//     displayMessage(message);
+//   } else {
+//     unsigned long now = millis();
+//     if (now - countdownStart > 1000) {
+//       countdownStart = now;
+//       if (message == clearMessage) {
+//         message = lastMessage;
+//         lastMessage = clearMessage;
+//       } else {
+//         lastMessage = message;
+//         message = clearMessage;
+//       }
+//       if (message != NULL) {
+//         displayMessage(message);
+//       }
+//     }
+//   }
+// }
