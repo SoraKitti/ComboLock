@@ -14,6 +14,8 @@
 #define ILLUMINATION_TIME 500u
 #define NUMBER_OF_DIGITS 8
 
+void clearDisplay();
+void comboDisplay();
 void cursor(int position);
 uint8_t getKeyPressed();
 void displayData(uint8_t address, uint8_t value);
@@ -28,6 +30,9 @@ void reEnterDisplay();
 void changedDisplay();
 void noChangeDisplay();
 void closedDisplay();
+bool leftButtonIsPressed();
+bool rightButtonIsPressed();
+void confirmCombo();
 
 cowpi_ioPortRegisters *ioPorts;   // an array of I/O ports
 cowpi_spiRegisters *spi;          // a pointer to the single set of SPI registers
@@ -39,12 +44,14 @@ unsigned long lastKeypadPress = 0;
 unsigned long cursorHalfSecond = 0;
 bool blinkState = false; //Variable for cursor
 int position = 3; //Position var for curson
+int attempt = 1; //Bad try tracker
 bool key1 = false;
 bool key2 = false;
 bool key3 = false;
 bool key4 = false;
 bool key5 = false;
 bool key6 = false;
+bool correctCombo = true;
 
 // return 0 for invalid key, return 1 for valid key
 int base(uint8_t key) {
@@ -108,18 +115,33 @@ void setup() {
   cowpi_setup(SPI | MAX7219);
   ioPorts = (cowpi_ioPortRegisters *)(cowpi_IObase + 0x03);
   spi = (cowpi_spiRegisters *)(cowpi_IObase + 0x2C);
-  builderArray[2] = 255;
-   displayData(3, 0b00000001);
-   builderArray[5] = 255;
-   displayData(6, 0b00000001);
+  comboDisplay();
 }
 
 
 void loop() {
   cursor(position);
-  if(!digitalRead(9) && (millis() - lastRightButtonPress > 100u)){
+  if(rightButtonIsPressed()){
     position++;
-    lastRightButtonPress = millis();
+  }
+  
+  //Checks Combo and displays attempts
+  if(leftButtonIsPressed()){
+    confirmCombo();
+    if(!correctCombo){
+      badTryDisplay(attempt);
+      delay(1000);
+      comboDisplay();
+      attempt++;
+    }
+    if(attempt == 4){
+      while(0 < 1){
+        alertDisplay();
+        delay(250);
+        clearDisplay();
+        delay(250);
+      }
+    }
   }
   
   //testSimpleIO();
@@ -138,8 +160,41 @@ void loop() {
     }
       
   } else {
-    Serial.println("Error reading keypad.");
+    //Serial.println("Error reading keypad.");
   }
+}
+
+void clearDisplay() {
+  for (int i = 0; i < 8; i++) {
+    displayData(i+1, 0x00);
+  }
+}
+
+void comboDisplay(){
+  builderArray[2] = 255;
+  displayData(3, 0b00000001);
+  builderArray[5] = 255;
+  displayData(6, 0b00000001);
+  EEPROM.put(2, 255);
+  EEPROM.put(5, 255);
+}
+
+void confirmCombo(){
+  if(builderArray[0] == 0x00 || builderArray[1] == 0x00 || builderArray[3] == 0x00 || 
+     builderArray[4] == 0x00 || builderArray[6] == 0x00 || builderArray[7] == 0x00){
+    errorDisplay();
+    delay(1000);
+    comboDisplay();
+  }
+  else{
+    for(int i = 0; i < sizeof(builderArray); i++){
+      int input = 0;
+      EEPROM.get(i, input);
+      if(input != builderArray[i]){
+        correctCombo = false;
+      }
+    }
+  }  
 }
 
 
@@ -501,16 +556,24 @@ uint8_t rightSwitchLastPosition = 0;
 // void alarmUsingDelay();
 // void responsiveMessageWithoutInterrupts();
 // void displayMessage();
-// bool leftButtonIsPressed();
-// bool rightButtonIsPressed(){
-//   unsigned long now = millis();
-//   if(digitalRead(9) && now - lastRightButtonPress > DEBOUNCE_TIME){
-//     lastRightButtonPress = now;
-//     return true;
-//   } else{
-//     return false;
-//   }
-// };
+bool leftButtonIsPressed(){
+  unsigned long now = millis();
+  if(!digitalRead(8) && (now - lastRightButtonPress > 300u)){
+    lastLeftButtonPress = now;
+    return true;
+  } else{
+    return false;
+  }
+}
+bool rightButtonIsPressed(){
+  unsigned long now = millis();
+  if(!digitalRead(9) && (now - lastRightButtonPress > 100u)){
+    lastRightButtonPress = now;
+    return true;
+  } else{
+    return false;
+  }
+}
 // bool leftSwitchInLeftPosition();
 // bool leftSwitchInRightPosition();
 // bool rightSwitchInLeftPosition();
