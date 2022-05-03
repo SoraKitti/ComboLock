@@ -45,6 +45,7 @@ unsigned long cursorHalfSecond = 0;
 bool blinkState = false; //Variable for cursor
 int position = 3; //Position var for curson
 int attempt = 1; //Bad try tracker
+bool sixEntered = false; //Check if 6 numbers were entered
 bool key1 = false;
 bool key2 = false;
 bool key3 = false;
@@ -52,6 +53,7 @@ bool key4 = false;
 bool key5 = false;
 bool key6 = false;
 bool correctCombo = true;
+bool locked = true;
 
 // return 0 for invalid key, return 1 for valid key
 int base(uint8_t key) {
@@ -80,6 +82,7 @@ int base(uint8_t key) {
 }
 
 uint8_t builderArray[8] = {0x00};
+uint8_t keyArray[6] = {0x00};
 int numsInDisplay = 0;
 
 
@@ -116,35 +119,57 @@ void setup() {
   ioPorts = (cowpi_ioPortRegisters *)(cowpi_IObase + 0x03);
   spi = (cowpi_spiRegisters *)(cowpi_IObase + 0x2C);
   comboDisplay();
+  EEPROM.put(0, 6);
+  EEPROM.put(1, 5);
+  EEPROM.put(2, 4);
+  EEPROM.put(3, 3);
+  EEPROM.put(4, 2);
+  EEPROM.put(5, 1);
 }
 
 
 void loop() {
-  cursor(position);
-  if(rightButtonIsPressed()){
-    position++;
-  }
-  
-  //Checks Combo and displays attempts
-  if(leftButtonIsPressed()){
-    confirmCombo();
-    if(!correctCombo){
-      badTryDisplay(attempt);
-      delay(1000);
-      comboDisplay();
-      attempt++;
+  if(locked){
+    cursor(position);
+    if(rightButtonIsPressed()){
+      position++;
     }
-    if(attempt == 4){
-      while(0 < 1){
-        alertDisplay();
-        delay(250);
-        clearDisplay();
-        delay(250);
+    //Checks Combo and displays attempts
+    if(leftButtonIsPressed()){
+      for(int i = 0; i < 6; i++){
+        int value = 0;
+        EEPROM.get(i, value);
+        Serial.println(keyArray[i]);
+        Serial.println(value);
+      }
+      confirmCombo();
+      if(!correctCombo){
+        badTryDisplay(attempt);
+        delay(1000);
+        comboDisplay();
+        attempt++;
+      }
+      if(attempt == 4){
+        while(0 < 1){
+          alertDisplay();
+          digitalWrite(12, HIGH);
+          delay(250);
+          clearDisplay();
+          digitalWrite(12, LOW);
+          delay(250);
+        }
+      }
+      if(correctCombo && sixEntered){
+        labOpenDisplay();
+        locked = false;
+        delay(1000);
       }
     }
   }
-  
-  //testSimpleIO();
+  if(!locked){
+
+  }
+
   if (((ioPorts[A0_A5].input & 0b00001111) != 0b00001111) && (millis() - lastKeypadPress > BUTTON_NO_REPEAT_TIME)) {
     uint8_t keypress = getKeyPressed();
     if (keypress < 0x10) {
@@ -175,23 +200,25 @@ void comboDisplay(){
   displayData(3, 0b00000001);
   builderArray[5] = 255;
   displayData(6, 0b00000001);
-  EEPROM.put(2, 255);
-  EEPROM.put(5, 255);
 }
 
 void confirmCombo(){
-  if(builderArray[0] == 0x00 || builderArray[1] == 0x00 || builderArray[3] == 0x00 || 
-     builderArray[4] == 0x00 || builderArray[6] == 0x00 || builderArray[7] == 0x00){
+  if(keyArray[0] == 0x00 || keyArray[1] == 0x00 || keyArray[2] == 0x00 || 
+     keyArray[3] == 0x00 || keyArray[4] == 0x00 || keyArray[5] == 0x00){
     errorDisplay();
     delay(1000);
     comboDisplay();
+    sixEntered = false;
   }
   else{
-    for(int i = 0; i < sizeof(builderArray); i++){
+    for(int i = 0; i < sizeof(keyArray); i++){
+      correctCombo = true;
       int input = 0;
       EEPROM.get(i, input);
-      if(input != builderArray[i]){
+      if(input != keyArray[i]){
         correctCombo = false;
+      } else{
+        sixEntered = true;
       }
     }
   }  
@@ -204,10 +231,12 @@ void buildCombo(uint8_t key, int position) {
     case(0):
       if(!key1){
         builderArray[7] = sevenSegments[key];
+        keyArray[5] = key;
         key1 = true;
         key2 = false;
       } else if(!key2){
         builderArray[6] = sevenSegments[key];
+        keyArray[4] = key;
         key2 = true;
         key1 = false;
       }
@@ -215,10 +244,12 @@ void buildCombo(uint8_t key, int position) {
     case(1): 
       if(!key3){
         builderArray[4] = sevenSegments[key];
+        keyArray[3] = key;
         key3 = true;
         key4 = false;
       } else if(!key4){
         builderArray[3] = sevenSegments[key];
+        keyArray[2] = key;
         key4 = true;
         key3 = false;
       }
@@ -226,10 +257,12 @@ void buildCombo(uint8_t key, int position) {
     case(2):
       if(!key5){
         builderArray[1] = sevenSegments[key];
+        keyArray[1] = key;
         key5 = true;
         key6 = false;
       } else if(!key6){
         builderArray[0] = sevenSegments[key];
+        keyArray[0] = key;
         key6 = true;
         key5 = false;
       }
@@ -462,94 +495,6 @@ void displayData(uint8_t address, uint8_t value) {
 
 uint8_t leftSwitchLastPosition = 0;
 uint8_t rightSwitchLastPosition = 0;
-
-// void testSimpleIO() {
-//   uint8_t printedThisTime = 0;
-//   // uint8_t leftSwitchCurrentPosition = digitalRead(A4);
-//   uint8_t leftSwitchCurrentPosition = ioPorts[A0_A5].input & 0b00010000;
-//   // uint8_t rightSwitchCurrentPosition = digitalRead(A5);
-//   uint8_t rightSwitchCurrentPosition = ioPorts[A0_A5].input & 0b00100000;
-//   // uint8_t leftButtonCurrentPosition = digitalRead(8);
-//   uint8_t leftButtonCurrentPosition = ioPorts[D8_D13].input & 1;
-  
-//   uint8_t rightButtonCurrentPosition = ioPorts[D8_D13].input & 0b10;
-
-//   // cannot use digital Write or read
-//   // digitalWrite(12, leftSwitchCurrentPosition && rightSwitchCurrentPosition);
-//   if (leftSwitchCurrentPosition && rightSwitchCurrentPosition) {
-//     // comment out LED for switches
-//     // ioPorts[D8_D13].output |= 0b10000;
-//   } else {
-//     ioPorts[D8_D13].output &= 0b11101111;
-//   }
-
-//   unsigned long now = millis();
-//   if ((leftSwitchCurrentPosition != leftSwitchLastPosition) && (now - lastLeftSwitchSlide > DEBOUNCE_TIME)) {
-//     if (!leftSwitchCurrentPosition) {
-//       Serial.print(now);
-//     }
-//     if (!leftSwitchCurrentPosition) {
-//       Serial.print("\tLeft switch changed: ");
-//       Serial.print(leftSwitchCurrentPosition);
-//     }
-//     leftSwitchLastPosition = leftSwitchCurrentPosition;
-//     printedThisTime = 1;
-//     lastLeftSwitchSlide = now;
-//   }
-//   if ((rightSwitchCurrentPosition != rightSwitchLastPosition) && (now - lastRightSwitchSlide > DEBOUNCE_TIME)) {
-//     if (!printedThisTime) {
-//       if (!leftSwitchCurrentPosition) {
-//         Serial.print(now);
-//       }
-//     }
-//     if (!leftSwitchCurrentPosition) {
-//       Serial.print("\tRight switch changed: ");
-//       Serial.print(rightSwitchCurrentPosition);
-//     }
-//     rightSwitchLastPosition = rightSwitchCurrentPosition;
-//     printedThisTime = 1;
-//     lastRightSwitchSlide = now;
-//   }
-//   if (!leftButtonCurrentPosition && (now - lastLeftButtonPress > BUTTON_NO_REPEAT_TIME)) {
-//     if (!printedThisTime) {
-//       if (!leftSwitchCurrentPosition) {
-//         Serial.print(now);
-//       } 
-//     }
-//     if (leftSwitchCurrentPosition != 0) {
-//       negate(numsInDisplay);
-//     }
-//     if (!leftSwitchCurrentPosition) {
-//       Serial.print("\tLeft button pressed");
-//     }
-//     printedThisTime = 1;
-//     lastLeftButtonPress = now;
-//   }
-//   if (!rightButtonCurrentPosition && (now - lastRightButtonPress > BUTTON_NO_REPEAT_TIME)) {
-//     if (!printedThisTime) {
-//       if (!leftSwitchCurrentPosition) {
-//         Serial.print(now);
-//       }
-//     }
-//     if (!leftSwitchCurrentPosition) {
-//       Serial.print("\tRight button pressed");
-//     }
-//     printedThisTime = 1;
-//     lastRightButtonPress = now;
-//     if (leftSwitchCurrentPosition == 0) {
-//       clearDisplay();
-//     } else {
-//       clearDisplay();
-//       displayData(1, sevenSegments[0]);
-//     }
-    
-//   }
-//   if(printedThisTime) {
-//     if (!leftSwitchCurrentPosition) {
-//       Serial.println();
-//     }
-//   }
-// }
 
 // Everything below this line was provided by Bohn and I have yet to actually integrate it into current setup
 
