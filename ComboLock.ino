@@ -86,8 +86,8 @@ int base(uint8_t key) {
 }
 
 uint8_t builderArray[8] = {0x00};
-uint8_t keyArray[6] = {0x00};
-uint8_t keyArrayCopy[6] = {0x00};
+uint8_t keyArray[6] = {0x0};
+uint8_t keyArrayCopy[6] = {0x0};
 
 
 const uint8_t sevenSegments[16] = {
@@ -139,7 +139,7 @@ void loop() {
     if(leftButtonIsPressed()){
       for(int i = 0; i < 6; i++){
         int value = 0;
-        EEPROM.get(i, value);
+        EEPROM.get(4*i, value);
         Serial.println(keyArray[i]);
         Serial.println(value);
       }
@@ -239,17 +239,17 @@ void loop() {
             comboDisplay();
             sixEntered = false;
           } else{
-              for(int i = 0; i < sizeof(keyArray); i++){
-              correctCombo = true;            
-              if(keyArrayCopy[i] != keyArray[i]){
-                correctCombo = false;
-              }      
+              correctCombo = true; 
+              for(int i = 0; i < sizeof(keyArray); i++){           
+                if(keyArrayCopy[i] != keyArray[i]){
+                  correctCombo = false;
+                }      
             }
             if(correctCombo){
               changedDisplay();
               delay(1000);
               for(int i = 0; i < 6; i++){
-                EEPROM.put(i, keyArray[i]);
+                EEPROM.put(4*i, keyArray[i]);
               }
               labOpenDisplay();
               changing = false;
@@ -319,10 +319,11 @@ void confirmCombo(){
     sixEntered = false;
   }
   else{
+    correctCombo = true;
     for(int i = 0; i < sizeof(keyArray); i++){
-      correctCombo = true;
       int input = 0;
-      EEPROM.get(i, input);
+      EEPROM.get(4*i, input);
+      Serial.println(input);
       if(input != keyArray[i]){
         correctCombo = false;
       } else{
