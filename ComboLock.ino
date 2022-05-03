@@ -602,18 +602,18 @@ void displayData(uint8_t address, uint8_t value) {
 }
 
 bool leftButtonIsPressed(){
-  unsigned long now = millis();
-  if(!digitalRead(8) && (now - lastRightButtonPress > 300u)){
-    lastLeftButtonPress = now;
+  if(!digitalRead(8)){
+    while(!digitalRead(8));
+    delay(20);
     return true;
   } else{
     return false;
   }
 }
 bool rightButtonIsPressed(){
-  unsigned long now = millis();
-  if(!digitalRead(9) && (now - lastRightButtonPress > 100u)){
-    lastRightButtonPress = now;
+  if(!digitalRead(9)){
+    while(!digitalRead(9));
+    delay(20);
     return true;
   } else{
     return false;
