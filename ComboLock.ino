@@ -14,6 +14,7 @@
 #define ILLUMINATION_TIME 500u
 #define NUMBER_OF_DIGITS 8
 
+void keyPadInput();
 void clearDisplay();
 void comboDisplay();
 void cursor(int position);
@@ -33,13 +34,13 @@ void closedDisplay();
 bool leftButtonIsPressed();
 bool rightButtonIsPressed();
 void confirmCombo();
+void clearBuilder();
+void clearKeys();
 
 cowpi_ioPortRegisters *ioPorts;   // an array of I/O ports
 cowpi_spiRegisters *spi;          // a pointer to the single set of SPI registers
 unsigned long lastLeftButtonPress = 0;
 unsigned long lastRightButtonPress = 0;
-unsigned long lastLeftSwitchSlide = 0;
-unsigned long lastRightSwitchSlide = 0;
 unsigned long lastKeypadPress = 0;
 unsigned long cursorHalfSecond = 0;
 bool blinkState = false; //Variable for cursor
@@ -54,6 +55,9 @@ bool key5 = false;
 bool key6 = false;
 bool correctCombo = true;
 bool locked = true;
+bool changing = false;
+bool enter = true;
+bool reEnter = false;
 
 // return 0 for invalid key, return 1 for valid key
 int base(uint8_t key) {
@@ -83,7 +87,7 @@ int base(uint8_t key) {
 
 uint8_t builderArray[8] = {0x00};
 uint8_t keyArray[6] = {0x00};
-int numsInDisplay = 0;
+uint8_t keyArrayCopy[6] = {0x00};
 
 
 const uint8_t sevenSegments[16] = {
@@ -119,16 +123,13 @@ void setup() {
   ioPorts = (cowpi_ioPortRegisters *)(cowpi_IObase + 0x03);
   spi = (cowpi_spiRegisters *)(cowpi_IObase + 0x2C);
   comboDisplay();
-  EEPROM.put(0, 6);
-  EEPROM.put(1, 5);
-  EEPROM.put(2, 4);
-  EEPROM.put(3, 3);
-  EEPROM.put(4, 2);
-  EEPROM.put(5, 1);
+  pinMode(A4, INPUT_PULLUP);
+  pinMode(A5, INPUT_PULLUP);
 }
 
 
 void loop() {
+  keyPadInput();
   if(locked){
     cursor(position);
     if(rightButtonIsPressed()){
@@ -161,31 +162,138 @@ void loop() {
       }
       if(correctCombo && sixEntered){
         labOpenDisplay();
-        locked = false;
         delay(1000);
+        locked = false;
       }
     }
   }
   if(!locked){
-
+    if(rightButtonIsPressed() && !digitalRead(A4) && !digitalRead(A5) && !changing){
+      unsigned long now = millis();
+      while(millis() - now < 500){
+        if(rightButtonIsPressed()){
+          closedDisplay();
+          delay(1000);
+          clearDisplay();
+          clearBuilder();
+          clearKeys();
+          comboDisplay();
+          position = 3;
+          locked = true;
+        }
+      }
+    }
+    if(digitalRead(A4) && digitalRead(A5) && leftButtonIsPressed() && !changing){
+      changing = true;
+      enter = true;
+      enterDisplay();
+      delay(1000);
+    }
+    if(changing){
+      clearDisplay();
+      clearBuilder();
+      clearKeys();
+      comboDisplay();
+      position = 3;
+      while(enter){
+        cursor(position);
+        if(rightButtonIsPressed()){
+          position++;
+        }
+        keyPadInput();
+        if(!digitalRead(A4) && leftButtonIsPressed()){
+          if(builderArray[0] == 0x00 || builderArray[1] == 0x00 || builderArray[3] == 0x00 || 
+             builderArray[4] == 0x00 || builderArray[6] == 0x00 || builderArray[7] == 0x00){
+            errorDisplay();
+            delay(1000);
+            comboDisplay();
+            sixEntered = false;
+          } else{
+            reEnterDisplay();
+            delay(1000);
+            for(int i = 0; i < 6; i++){
+              keyArrayCopy[i] = keyArray[i];
+            }
+            reEnter = true;
+            enter = false;
+          } 
+        }
+      }
+      clearDisplay();
+      clearBuilder();
+      clearKeys();
+      comboDisplay();
+      position = 3;
+      while(reEnter){
+        cursor(position);
+        if(rightButtonIsPressed()){
+          position++;
+        }
+        keyPadInput();
+        correctCombo = false;
+        if(!digitalRead(A5) && leftButtonIsPressed()){
+          if(builderArray[0] == 0x00 || builderArray[1] == 0x00 || builderArray[3] == 0x00 || 
+             builderArray[4] == 0x00 || builderArray[6] == 0x00 || builderArray[7] == 0x00){
+            errorDisplay();
+            delay(1000);
+            comboDisplay();
+            sixEntered = false;
+          } else{
+              for(int i = 0; i < sizeof(keyArray); i++){
+              correctCombo = true;            
+              if(keyArrayCopy[i] != keyArray[i]){
+                correctCombo = false;
+              }      
+            }
+            if(correctCombo){
+              changedDisplay();
+              delay(1000);
+              for(int i = 0; i < 6; i++){
+                EEPROM.put(i, keyArray[i]);
+              }
+              labOpenDisplay();
+              changing = false;
+              reEnter = false;          
+            }
+            if(!correctCombo){
+              noChangeDisplay();
+              delay(1000);
+              labOpenDisplay();
+              changing = false;
+              reEnter = false;
+            }
+          }
+        }
+      }
+    }
   }
+}
 
+void keyPadInput(){
   if (((ioPorts[A0_A5].input & 0b00001111) != 0b00001111) && (millis() - lastKeypadPress > BUTTON_NO_REPEAT_TIME)) {
     uint8_t keypress = getKeyPressed();
     if (keypress < 0x10) {
-
       // get count of nums in combination currently, then call buildCombo with the next index and the key pressed, then update count
-      buildCombo(keypress, position);
-      
+      buildCombo(keypress, position); 
     }
-
     if ((ioPorts[A0_A5].input & 0b00010000) == 0) {
       Serial.print("Key pressed: ");
       Serial.println(keypress, HEX);
-    }
-      
+    }   
   } else {
     //Serial.println("Error reading keypad.");
+  }
+}
+
+void clearBuilder(){
+  for(int i = 0; i < 8; i++){
+    builderArray[i] = 0x00;
+  }
+}
+
+void clearKeys(){
+  for(int i = 0; i < 6; i++){
+    keyArray[i] = 0x00;
   }
 }
 
@@ -203,8 +311,8 @@ void comboDisplay(){
 }
 
 void confirmCombo(){
-  if(keyArray[0] == 0x00 || keyArray[1] == 0x00 || keyArray[2] == 0x00 || 
-     keyArray[3] == 0x00 || keyArray[4] == 0x00 || keyArray[5] == 0x00){
+  if(builderArray[0] == 0x00 || builderArray[1] == 0x00 || builderArray[3] == 0x00 || 
+     builderArray[4] == 0x00 || builderArray[6] == 0x00 || builderArray[7] == 0x00){
     errorDisplay();
     delay(1000);
     comboDisplay();
@@ -430,7 +538,7 @@ void cursor(int position){
         }
       }
     break;
-    //repeat for each position 
+    //Repeat for each position 
     case 1: 
       displayData(8, builderArray[7] &= 0b01111111);
       displayData(7, builderArray[6] &= 0b01111111);
@@ -493,14 +601,6 @@ void displayData(uint8_t address, uint8_t value) {
   cowpi_spiDisable;
 }
 
-uint8_t leftSwitchLastPosition = 0;
-uint8_t rightSwitchLastPosition = 0;
-
-// Everything below this line was provided by Bohn and I have yet to actually integrate it into current setup
-
-// void alarmUsingDelay();
-// void responsiveMessageWithoutInterrupts();
-// void displayMessage();
 bool leftButtonIsPressed(){
   unsigned long now = millis();
   if(!digitalRead(8) && (now - lastRightButtonPress > 300u)){
@@ -519,68 +619,3 @@ bool rightButtonIsPressed(){
     return false;
   }
 }
-// bool leftSwitchInLeftPosition();
-// bool leftSwitchInRightPosition();
-// bool rightSwitchInLeftPosition();
-// bool rightSwitchInRightPosition();
-
-// unsigned long countdownStart = 0;
-// const uint8_t *message = NULL;
-// const uint8_t *lastMessage = NULL;
-
-// const uint8_t alertMessage[8] = {...};
-// const uint8_t leftMessage[8] = {...};
-// const uint8_t rightMessage[8] = {...};
-// const uint8_t clearMessage[8] = {...};
-
-// void setup() {
-//   Serial.begin(9600);
-//   cowpi_setup(SPI | MAX7219);
-// }
-
-// void loop() {
-//   if (leftSwitchInLeftPosition() && leftButtonIsPressed()) {
-//     alarmUsingDelay();
-//   } else if (leftSwitchInRightPosition()) {
-//     responsiveMessageWithoutInterrupts();
-//   }
-// }
-
-// void alarmUsingDelay() {
-//   displayMessage(alertMessage);
-//   while(1) {
-//     digitalWrite(12, HIGH);
-//     delay(250);
-//     digitalWrite(12, LOW);
-//     delay(250);
-//   }
-// }
-
-// void responsiveMessageWithoutInterrupts() {
-//   if (leftButtonIsPressed()) {
-//     countdownStart = millis();
-//     message = leftMessage;
-//     lastMessage = clearMessage;
-//     displayMessage(message);
-//   } else if (rightButtonIsPressed()) {
-//     countdownStart = millis();
-//     message = rightMessage;
-//     lastMessage = clearMessage;
-//     displayMessage(message);
-//   } else {
-//     unsigned long now = millis();
-//     if (now - countdownStart > 1000) {
-//       countdownStart = now;
-//       if (message == clearMessage) {
-//         message = lastMessage;
-//         lastMessage = clearMessage;
-//       } else {
-//         lastMessage = message;
-//         message = clearMessage;
-//       }
-//       if (message != NULL) {
-//         displayMessage(message);
-//       }
-//     }
-//   }
-// }
